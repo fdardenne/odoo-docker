@@ -1,0 +1,148 @@
+#!/usr/bin/env python3
+# docker run --network onetwork -p 8070:8069 -e PGHOST=db -e PGUSER=odoo -e PGPASSWORD=odoo -v ~/odoocker/odoo:/home/odoo/src odoo
+# docker run --name db --network onetwork -e POSTGRES_PASSWORD=odoo -e POSTGRES_USER=odoo -e POSTGRES_DB=postgres -d postgres
+# docker run -d \
+#   --name traefik \
+#   --network onetwork \
+#   -p 80:80 -p 8080:8080 \
+#   -v /var/run/docker.sock:/var/run/docker.sock \
+#   traefik:v2.11 \
+#   --api.insecure=true \
+#   --providers.docker \
+#   --entrypoints.web.address=:80 \
+#   --providers.docker.exposedbydefault=false
+import os
+import subprocess
+import argparse
+
+BASE_PORT = 8070
+INSTANCE_DIR = os.path.expanduser("~/odoocker/instances")
+COMMUNITY_REPO = os.path.expanduser("~/odoocker/odoo")  # Repo de base cloné
+ENTERPRISE_REPO = os.path.expanduser("~/odoocker/enterprise")
+PROJECTS_DIR = os.path.expanduser("~/odoocker/projects")
+
+def fetch_branch(repo_path, branch_name):
+    remotes = ["dev", "origin"]
+    found = False
+    for remote in remotes:
+        # Check if branch exists on remote
+        result = subprocess.run(
+            ["git", "-C", repo_path, "ls-remote", "--heads", remote, branch_name],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=True
+        )
+        res = result.stdout
+        if res.strip():
+            print(f"→ Fetching branch '{branch_name}' from remote '{remote}'")
+            subprocess.run(["git", "-C", repo_path, "fetch", remote, f"{branch_name}"], check=True)
+            found = True
+    return found
+
+def instanciate_odoo_folder(branch_name, worktree_path):
+    fetch_branch(COMMUNITY_REPO, branch_name)
+    import shutil
+    shutil.copytree(COMMUNITY_REPO, os.path.join(worktree_path, "src", "odoo"), dirs_exist_ok=True)
+    subprocess.run(["git", "-C", os.path.join(worktree_path, "src", "odoo"), "checkout", branch_name], check=True)
+    if os.path.exists(ENTERPRISE_REPO):
+        found = fetch_branch(ENTERPRISE_REPO, branch_name)
+        if found:
+            shutil.copytree(ENTERPRISE_REPO, os.path.join(worktree_path, "src", "enterprise"), dirs_exist_ok=True)
+            subprocess.run(["git", "-C", os.path.join(worktree_path, "src", "enterprise"), "checkout", branch_name], check=True)
+        else:
+            os.makedirs(os.path.join(worktree_path, "src", "enterprise"), exist_ok=True)
+
+def create_git_worktree(branch_name, worktree_path):
+    print(f"→ Create the worktree for the branch '{branch_name}' in '{worktree_path}'")
+    subprocess.run(["git", "-C", COMMUNITY_REPO, "worktree", "prune"], check=True)
+    fetch_branch(COMMUNITY_REPO, branch_name)
+    subprocess.run(["git", "-C", COMMUNITY_REPO, "worktree",  "add", os.path.join(worktree_path, "src", "odoo"), branch_name], check=True)
+    if os.path.exists(ENTERPRISE_REPO):
+        subprocess.run(["git", "-C", ENTERPRISE_REPO, "worktree", "prune"], check=True)
+        found = fetch_branch(ENTERPRISE_REPO, branch_name)
+        if found:
+            subprocess.run(["git", "-C", ENTERPRISE_REPO, "worktree", "add", os.path.join(worktree_path, "src", "enterprise"), branch_name], check=True)
+        else:
+            os.makedirs(os.path.join(worktree_path, "src", "enterprise"), exist_ok=True)
+
+def run_odoo_container(branch_name, project, worktree_path, addons_to_install):
+    container_name = project if project else branch_name
+    print(f"→ Running the container {container_name} ({container_name}.localhost)")
+    volumes = [
+        "-v", f"{worktree_path}/src:/home/odoo/src",
+        "-v", f"{worktree_path}/data:/home/odoo/data",
+        "-v", f"{os.path.join(INSTANCE_DIR, '../extensions')}:/root/.vscode-server/extensions",
+    ]
+
+    if project:
+        project_path = os.path.join(PROJECTS_DIR, project)
+        volumes += ["-v", f"{project_path}:/home/odoo/custom"]
+
+    subprocess.run([
+        "docker", "run", "-d", "--rm",  "--name", container_name,
+        "--network", "onetwork",
+        "-e", "PGHOST=db",
+        "-e", "PGUSER=odoo",
+        "-e", "PGPASSWORD=odoo",
+        "-e", f"DB={container_name}",
+        *volumes,
+        "-l", "traefik.enable=true",
+        "-l", f"traefik.http.routers.{container_name}.rule=Host(`{container_name}.localhost`)",
+        "-l", f"traefik.http.routers.{container_name}.entrypoints=web",
+        "-l", f"traefik.http.services.{container_name}.loadbalancer.server.port=8069",
+        "odoo",
+        "tail", "-f", "/dev/null"
+    ], check=True)
+    cmd = f'yes "" | {worktree_path}/src/odoo/addons/web/tooling/enable.sh'
+    subprocess.run(cmd, shell=True, check=True)
+    # I don't like git hooks, feel free to comment the following line if it suits your needs
+    cmd = f"git -C {worktree_path}/src/odoo/ config core.hooksPath ''"
+    subprocess.run(cmd, shell=True, check=True)
+    subprocess.run(["docker", "exec", "-it", container_name, "/home/odoo/src/odoo/odoo-bin", "--dev=all", "-d", container_name, "-i", addons_to_install], check=True)
+
+def container_exists(name):
+    """Check if a container with given name is running."""
+    result = subprocess.run(
+        ["docker", "ps", "-q", "-f", f"name=^{name}$"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        check=True,
+    )
+    return bool(result.stdout.strip())
+
+def main():
+    parser = argparse.ArgumentParser(description="Run Odoo in a Docker container with a specific branch.")
+    parser.add_argument("-b", "--branch", type=str, help="Select the odoo and enterprise branch to run (example: 18.0). A worktree of this branch will be created in the instances folder. Define the name if no project is provided.")
+    parser.add_argument("-p", "--project", type=str, help="The addons in the folder projects/{project_name} will be mounted. Also define the name of the container.")
+    parser.add_argument("-i", "--install", type=str, help="Install the specified addons")
+    parser.add_argument("-c", "--connect", action="store_true", help="Connect to the container with the shell")
+    parser.add_argument("--code", action="store_true", help="Open vscode to the instances")
+    args = parser.parse_args()
+
+    branch = args.branch
+    project = args.project
+    
+    worktree_path = os.path.join(INSTANCE_DIR, branch)
+
+    if not os.path.exists(worktree_path):
+        create_git_worktree(branch, worktree_path)
+    if project and not os.path.exists(os.path.join(PROJECTS_DIR, project)):
+        os.makedirs(os.path.join(PROJECTS_DIR, project), exist_ok=True)
+
+    container_name = project if project else branch
+    if container_exists(container_name):
+        if args.connect:
+            subprocess.run(["docker", "exec", "-it", container_name, "bash"], check=True)
+        elif args.code:
+            subprocess.run(["code", os.path.join(worktree_path,"src")], check=True)
+        else:
+            subprocess.run(["docker", "exec", "-it", container_name, "/home/odoo/src/odoo/odoo-bin", "--dev=all", "-d", container_name, "-i", args.install], check=True)
+    else:
+        run_odoo_container(branch, project, worktree_path, args.install)
+        if args.code:
+            subprocess.run(["code", os.path.join(worktree_path,"src")], check=True)
+
+if __name__ == "__main__":
+    main()

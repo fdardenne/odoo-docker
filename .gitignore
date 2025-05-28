@@ -1,0 +1,5 @@
+instances
+odoo
+enterprise
+projects/**/*
+extension/**/*

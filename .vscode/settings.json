@@ -1,0 +1,22 @@
+{
+  "python.defaultInterpreterPath": "/usr/local/bin/python",
+  "editor.defaultFormatter": "dbaeumer.vscode-eslint",
+  "files.exclude": {
+                    "**/.git": true,
+                    "**/.svn": true,
+                    "**/.hg": true,
+                    "**/CVS": true,
+                    "**/.DS_Store": true,
+                    "**/Thumbs.db": true,
+                    "**/node_modules": true,
+                    "**/.ruff_cache": true
+                },
+    "ruff.nativeServer": "on",
+    "ruff.lint": {
+        "select": ["ALL"],
+        "preview": true,
+        "ignore": ["ANN", "B", "C901", "COM812", "D", "E501", "E741", "EM101", "ERA001", "FBT", "I001", "N", "PD", "PERF", "PIE790", "PLR", "PT", "Q", "RET502", "RET503", "RSE102", "RUF001", "RUF012", "S", "SIM102", "SIM108", "SLF001", "TID252", "UP031", "TRY002", "TRY003", "TRY300", "UP038", "E713", "SIM117"]
+    },
+    "search.useIgnoreFiles": false,
+    "search.useGlobalIgnoreFiles": false,
+}
