@@ -80,9 +80,10 @@ def run_odoo_container(branch_name, project, worktree_path, addons_to_install, d
 
     if project:
         project_path = os.path.join(PROJECTS_DIR, project)
-        volumes += ["-v", f"{project_path}:/home/odoo/custom"]
-        cmd = 'pip3 install --target /home/odoo/custom -r requirements.txt'
-        subprocess.run(cmd, shell=True, check=True)
+        requirements_path = os.path.join(PROJECTS_DIR, project, "requirements.txt")
+        if os.path.exists(requirements_path):
+            cmd = 'pip3 install --target /home/odoo/custom -r requirements.txt'
+            subprocess.run(cmd, shell=True, check=True)
 
     subprocess.run([
         "docker", "run", "-d", "--rm",  "--name", container_name,
@@ -111,7 +112,7 @@ def run_odoo_container(branch_name, project, worktree_path, addons_to_install, d
     cmd = [
         "docker", "exec", "-it", container_name,
         "bash", "-c",
-        f"{debugpy_cmd}/home/odoo/src/odoo/odoo-bin --dev=all -d {container_name} {addons_arg}"
+        f"{debugpy_cmd}/home/odoo/src/odoo/odoo-bin --dev=all --addons-path=/home/odoo/src/custom,/home/odoo/src/enterprise,/home/odoo/src/odoo/addons -d {container_name} {addons_arg}"
     ]
     subprocess.run(cmd, check=True)
     # subprocess.run(["docker", "exec", "-it", container_name, "/home/odoo/src/odoo/odoo-bin", "--dev=all", "-d", container_name, "-i", addons_to_install], check=True)
@@ -142,10 +143,12 @@ def main():
     
     worktree_path = os.path.join(INSTANCE_DIR, odoo_version)
 
-    if not os.path.exists(worktree_path):
-        create_git_worktree(odoo_version, worktree_path)
     if project and not os.path.exists(os.path.join(PROJECTS_DIR, project)):
         os.makedirs(os.path.join(PROJECTS_DIR, project), exist_ok=True)
+    if not os.path.exists(worktree_path):
+        create_git_worktree(odoo_version, worktree_path)
+        if project:
+            shutil.copytree(os.path.join(PROJECTS_DIR, project), os.path.join(worktree_path, "src", "custom"), dirs_exist_ok=True)
 
     container_name = project if project else odoo_version
     if args.code:
@@ -160,7 +163,7 @@ def main():
                 cmd = [
                     "docker", "exec", "-it", container_name,
                     "bash", "-c",
-                    f"{debugpy_cmd}/home/odoo/src/odoo/odoo-bin --dev=all -d {container_name} {addons_arg}"
+                    f"{debugpy_cmd}/home/odoo/src/odoo/odoo-bin --dev=all --addons-path=/home/odoo/src/custom,/home/odoo/src/enterprise,/home/odoo/src/odoo/addons -d {container_name} {addons_arg}"
                 ]
                 subprocess.run(cmd, check=True)
             except KeyboardInterrupt:
