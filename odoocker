@@ -101,7 +101,15 @@ def run_odoo_container(branch_name, project, worktree_path, addons_to_install):
     # I don't like git hooks, feel free to comment the following line if it suits your needs
     cmd = f"git -C {worktree_path}/src/odoo/ config core.hooksPath ''"
     subprocess.run(cmd, shell=True, check=True)
-    subprocess.run(["docker", "exec", "-it", container_name, "/home/odoo/src/odoo/odoo-bin", "--dev=all", "-d", container_name, "-i", addons_to_install], check=True)
+
+    addons_arg = f"-i {addons_to_install}" if addons_to_install else ""
+    cmd = [
+        "docker", "exec", "-it", container_name,
+        "bash", "-c",
+        f"/home/odoo/src/odoo/odoo-bin --dev=all -d {container_name} {addons_arg}; exec bash"
+    ]
+    subprocess.run(cmd, check=True)
+    # subprocess.run(["docker", "exec", "-it", container_name, "/home/odoo/src/odoo/odoo-bin", "--dev=all", "-d", container_name, "-i", addons_to_install], check=True)
 
 def container_exists(name):
     """Check if a container with given name is running."""
