@@ -54,16 +54,24 @@ def instanciate_odoo_folder(branch_name, worktree_path):
         else:
             os.makedirs(os.path.join(worktree_path, "src", "enterprise"), exist_ok=True)
 
-def create_git_worktree(branch_name, worktree_path):
+def create_git_worktree(branch_name, worktree_path, detach):
     print(f"→ Create the worktree for the branch '{branch_name}' in '{worktree_path}'")
     subprocess.run(["git", "-C", COMMUNITY_REPO, "worktree", "prune"], check=True)
     fetch_branch(COMMUNITY_REPO, branch_name)
-    subprocess.run(["git", "-C", COMMUNITY_REPO, "worktree",  "add", "--detach", os.path.join(worktree_path, "src", "odoo"), branch_name], check=True)
+    worktree_cmd = ["git", "-C", COMMUNITY_REPO, "worktree", "add"]
+    if detach:
+        worktree_cmd.append("--detach")
+    worktree_cmd.extend([os.path.join(worktree_path, "src", "odoo"), branch_name])
+    subprocess.run(worktree_cmd, check=True)
     if os.path.exists(ENTERPRISE_REPO):
         subprocess.run(["git", "-C", ENTERPRISE_REPO, "worktree", "prune"], check=True)
         found = fetch_branch(ENTERPRISE_REPO, branch_name)
         if found:
-            subprocess.run(["git", "-C", ENTERPRISE_REPO, "worktree", "add", "--detach", os.path.join(worktree_path, "src", "enterprise"), branch_name], check=True)
+            worktree_cmd = ["git", "-C", ENTERPRISE_REPO, "worktree", "add"]
+            if detach:
+                worktree_cmd.append("--detach")
+            worktree_cmd.extend([os.path.join(worktree_path, "src", "enterprise"), branch_name])
+            subprocess.run(worktree_cmd, check=True)
         else:
             os.makedirs(os.path.join(worktree_path, "src", "enterprise"), exist_ok=True)
 
@@ -83,7 +91,7 @@ def run_odoo_container(branch_name, project, worktree_path, addons_to_install, d
             subprocess.run(cmd, shell=True, check=True)
 
     subprocess.run([
-        "docker", "run", "-d", "--rm",  "--name", container_name,
+        "docker", "run", "-d",  "--name", container_name,
         "--network", "onetwork",
         "-p", f"{debug_port}:5678",
         "-e", "PGHOST=db",
@@ -186,7 +194,7 @@ def main():
     if project and not os.path.exists(os.path.join(PROJECTS_DIR, project)):
         os.makedirs(os.path.join(PROJECTS_DIR, project), exist_ok=True)
     if not os.path.exists(worktree_path):
-        create_git_worktree(odoo_version, worktree_path)
+        create_git_worktree(odoo_version, worktree_path, detach=bool(project))
         vscode_src = os.path.join(INSTANCE_DIR, "../.vscode")
         vscode_dst = os.path.join(worktree_path, "src", ".vscode")
         if os.path.exists(vscode_src):
