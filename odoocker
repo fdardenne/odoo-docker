@@ -111,7 +111,7 @@ def run_odoo_container(branch_name, project, worktree_path, addons_to_install, d
     cmd = [
         "docker", "exec", "-it", container_name,
         "bash", "-c",
-        f"{debugpy_cmd}/home/odoo/src/odoo/odoo-bin --dev=all -d {container_name} {addons_arg}; exec bash"
+        f"{debugpy_cmd}/home/odoo/src/odoo/odoo-bin --dev=all -d {container_name} {addons_arg}"
     ]
     subprocess.run(cmd, check=True)
     # subprocess.run(["docker", "exec", "-it", container_name, "/home/odoo/src/odoo/odoo-bin", "--dev=all", "-d", container_name, "-i", addons_to_install], check=True)
@@ -160,7 +160,7 @@ def main():
                 cmd = [
                     "docker", "exec", "-it", container_name,
                     "bash", "-c",
-                    f"{debugpy_cmd}/home/odoo/src/odoo/odoo-bin --dev=all -d {container_name} {addons_arg}; exec bash"
+                    f"{debugpy_cmd}/home/odoo/src/odoo/odoo-bin --dev=all -d {container_name} {addons_arg}"
                 ]
                 subprocess.run(cmd, check=True)
             except KeyboardInterrupt:
