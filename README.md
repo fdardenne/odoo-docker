@@ -40,16 +40,17 @@ is only tested on macOS and may not work on other operating systems.
 
 Use the command:
 ```bash
-odoocker -b {odoo_branch_name} -i {addons_to_install}
+odoocker -v {odoo_branch_name} -i {addons_to_install} --code
 ```
-This will run Odoo on the specified branch and install the selected
-addons.
+This will run Odoo on the specified branch, install the selected
+addons and launch vscode on the instance folder.
 
-`odoocker` also accepts the `--code` flag to launch VS Code on the
-mounted folder, for example:
+`odoocker` also accepts the `--debug` flag to run odoo with debugpy
 ```bash
-odoocker -b {branch_name} --code
+odoocker -v {branch_name} --debug --code
 ```
+With this, we can attach to the odoo debugger with vscode 
+(Run & Debug in the vscode sidebar -> Attach to Odoo debug container)
 
 ## Known Limitations
 

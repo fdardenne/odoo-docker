@@ -129,7 +129,7 @@ def container_exists(name):
 
 def main():
     parser = argparse.ArgumentParser(description="Run Odoo in a Docker container with a specific branch.")
-    parser.add_argument("-b", "--branch", type=str, help="Select the odoo and enterprise branch to run (example: 18.0). A worktree of this branch will be created in the instances folder. Define the name if no project is provided.")
+    parser.add_argument("-v", "--version", type=str, help="Select the odoo and enterprise branch to run (example: 18.0). A worktree of this branch will be created in the instances folder. Define the name if no project is provided.")
     parser.add_argument("-p", "--project", type=str, help="The addons in the folder projects/{project_name} will be mounted. Also define the name of the container.")
     parser.add_argument("-i", "--install", type=str, help="Install the specified addons")
     parser.add_argument("-c", "--connect", action="store_true", help="Connect to the container with the shell")
@@ -137,17 +137,17 @@ def main():
     parser.add_argument("--code", action="store_true", help="Open vscode to the instances")
     args = parser.parse_args()
 
-    branch = args.branch
+    odoo_version = args.version
     project = args.project
     
-    worktree_path = os.path.join(INSTANCE_DIR, branch)
+    worktree_path = os.path.join(INSTANCE_DIR, odoo_version)
 
     if not os.path.exists(worktree_path):
-        create_git_worktree(branch, worktree_path)
+        create_git_worktree(odoo_version, worktree_path)
     if project and not os.path.exists(os.path.join(PROJECTS_DIR, project)):
         os.makedirs(os.path.join(PROJECTS_DIR, project), exist_ok=True)
 
-    container_name = project if project else branch
+    container_name = project if project else odoo_version
     if args.code:
         subprocess.run(["code", os.path.join(worktree_path, "src")], check=True)
     if container_exists(container_name):
@@ -165,9 +165,8 @@ def main():
                 subprocess.run(cmd, check=True)
             except KeyboardInterrupt:
                 print("\nOdoo stopped by user (Ctrl+C).")
-       
     else:
-        run_odoo_container(branch, project, worktree_path, args.install, args.debug)
+        run_odoo_container(odoo_version, project, worktree_path, args.install, args.debug)
 
 if __name__ == "__main__":
     main()
