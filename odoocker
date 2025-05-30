@@ -58,12 +58,12 @@ def create_git_worktree(branch_name, worktree_path):
     print(f"→ Create the worktree for the branch '{branch_name}' in '{worktree_path}'")
     subprocess.run(["git", "-C", COMMUNITY_REPO, "worktree", "prune"], check=True)
     fetch_branch(COMMUNITY_REPO, branch_name)
-    subprocess.run(["git", "-C", COMMUNITY_REPO, "worktree",  "add", os.path.join(worktree_path, "src", "odoo"), branch_name], check=True)
+    subprocess.run(["git", "-C", COMMUNITY_REPO, "worktree",  "add", "--detach", os.path.join(worktree_path, "src", "odoo"), branch_name], check=True)
     if os.path.exists(ENTERPRISE_REPO):
         subprocess.run(["git", "-C", ENTERPRISE_REPO, "worktree", "prune"], check=True)
         found = fetch_branch(ENTERPRISE_REPO, branch_name)
         if found:
-            subprocess.run(["git", "-C", ENTERPRISE_REPO, "worktree", "add", os.path.join(worktree_path, "src", "enterprise"), branch_name], check=True)
+            subprocess.run(["git", "-C", ENTERPRISE_REPO, "worktree", "add", "--detach", os.path.join(worktree_path, "src", "enterprise"), branch_name], check=True)
         else:
             os.makedirs(os.path.join(worktree_path, "src", "enterprise"), exist_ok=True)
 
@@ -106,10 +106,11 @@ def run_odoo_container(branch_name, project, worktree_path, addons_to_install, d
 
     addons_arg = f"-i {addons_to_install}" if addons_to_install else ""
     debugpy_cmd = "debugpy --listen 0.0.0.0:5678 " if debug else ""
+    project_addons= "/home/odoo/src/custom," if project else ""
     cmd = [
         "docker", "exec", "-it", container_name,
         "bash", "-c",
-        f"{debugpy_cmd}/home/odoo/src/odoo/odoo-bin --dev=all --addons-path=/home/odoo/src/custom,/home/odoo/src/enterprise,/home/odoo/src/odoo/addons -d {container_name} {addons_arg}"
+        f"{debugpy_cmd}/home/odoo/src/odoo/odoo-bin --dev=all --addons-path={project_addons}/home/odoo/src/enterprise,/home/odoo/src/odoo/addons -d {container_name} {addons_arg}"
     ]
     subprocess.run(cmd, check=True)
     # subprocess.run(["docker", "exec", "-it", container_name, "/home/odoo/src/odoo/odoo-bin", "--dev=all", "-d", container_name, "-i", addons_to_install], check=True)
@@ -126,30 +127,44 @@ def container_exists(name):
     return bool(result.stdout.strip())
 
 def find_available_port(start_port=5678, max_port=6000):
-    for port in range(start_port, max_port):
-        result = subprocess.run(
-            ["docker", "ps", "--format", "{{.Names}}"],
+    # Get all containers with port bindings
+    result = subprocess.run(
+        ["docker", "ps", "-a", "--format", "{{.ID}}"],
+        stdout=subprocess.PIPE,
+        stderr=subprocess.PIPE,
+        text=True,
+        check=True
+    )
+    container_ids = result.stdout.strip().splitlines()
+
+    used_ports = set()
+
+    for cid in container_ids:
+        inspect = subprocess.run(
+            ["docker", "inspect", "--format", "{{json .NetworkSettings.Ports}}", cid],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
-            check=True,
+            check=True
         )
-        containers = result.stdout.strip().splitlines()
-        port_in_use = False
-        for container in containers:
-            inspect = subprocess.run(
-                ["docker", "inspect", "--format", "{{range $p, $conf := .NetworkSettings.Ports}}{{if $conf}}{{$p}}{{end}} {{end}}", container],
-                stdout=subprocess.PIPE,
-                stderr=subprocess.PIPE,
-                text=True,
-                check=True,
-            )
-            ports = inspect.stdout.strip().split()
-            if any(str(port) in p for p in ports):
-                port_in_use = True
-                break
-        if not port_in_use:
+        port_info = inspect.stdout.strip()
+        if port_info == "null":
+            continue
+        try:
+            port_map = eval(port_info)  # Or use `json.loads` after replacing `'` with `"` safely
+            for key, val in (port_map or {}).items():
+                if val:  # If bound
+                    for binding in val:
+                        host_port = int(binding["HostPort"])
+                        used_ports.add(host_port)
+        except Exception:
+            continue
+
+    # Now find the first free port
+    for port in range(start_port, max_port):
+        if port not in used_ports:
             return port
+
     raise RuntimeError("No available port found in range.")
 
 def main():
