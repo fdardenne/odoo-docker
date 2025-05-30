@@ -71,11 +71,11 @@ TEMPLATE = """
     <div class="grid">
     {% for name in containers %}
         <div class="card">
-            <h3>{{ name }}</h3>
-            <p class="small"><a href="http://{{ name }}.localhost" target="_blank">http://{{ name }}.localhost</a></p>
+            <h3>{{ name["name"] }}</h3>
+            <p class="small"><a href="http://{{ url }}.localhost" target="_blank">http://{{ name["url"] }}.localhost</a></p>
             <div class="buttons">
-                <a href="http://{{ name }}.localhost/odoo?debug=assets" target="_blank">Open</a>
-                <a href="http://{{ name }}.localhost/web/tests?debug=assets" target="_blank">Hoot</a>
+                <a href="http://{{ name["url"] }}.localhost/odoo?debug=assets" target="_blank">Open</a>
+                <a href="http://{{ name["url"] }}.localhost/web/tests?debug=assets" target="_blank">Hoot</a>
             </div>
         </div>
     {% endfor %}
@@ -96,7 +96,8 @@ def get_odoo_containers():
                 continue
             name, image = line.split(maxsplit=1)
             if "odoo" in image.lower():
-                containers.append(name)
+                url = "".join(c if c.isalnum() or c == '-' else '-' for c in name)
+                containers.append({"name": name, "url": url})
         return containers
     except subprocess.CalledProcessError:
         return []

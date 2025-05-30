@@ -90,8 +90,10 @@ def run_odoo_container(branch_name, project, worktree_path, addons_to_install, d
             cmd = 'pip3 install --target /home/odoo/custom -r requirements.txt'
             subprocess.run(cmd, shell=True, check=True)
 
+    # Create a safe hostname for traefik (alphanumeric and hyphens only)
+    hostname = "".join(c if c.isalnum() or c == '-' else '-' for c in container_name)
     subprocess.run([
-        "docker", "run", "-d",  "--name", container_name,
+        "docker", "run", "-d", "--rm", "--name", container_name,
         "--network", "onetwork",
         "-p", f"{debug_port}:5678",
         "-e", "PGHOST=db",
@@ -100,9 +102,9 @@ def run_odoo_container(branch_name, project, worktree_path, addons_to_install, d
         "-e", f"DB={container_name}",
         *volumes,
         "-l", "traefik.enable=true",
-        "-l", f"traefik.http.routers.{container_name}.rule=Host(`{container_name}.localhost`)",
-        "-l", f"traefik.http.routers.{container_name}.entrypoints=web",
-        "-l", f"traefik.http.services.{container_name}.loadbalancer.server.port=8069",
+        "-l", f"traefik.http.routers.{hostname}.rule=Host(`{hostname}.localhost`)",
+        "-l", f"traefik.http.routers.{hostname}.entrypoints=web",
+        "-l", f"traefik.http.services.{hostname}.loadbalancer.server.port=8069",
         "odoo",
         "tail", "-f", "/dev/null"
     ], check=True)
@@ -177,6 +179,7 @@ def find_available_port(start_port=5678, max_port=6000):
 
 def main():
     parser = argparse.ArgumentParser(description="Run Odoo in a Docker container with a specific branch.")
+    parser.add_argument("command", nargs="?", choices=["clean"], help="Command to execute (e.g., clean)")
     parser.add_argument("-v", "--version", type=str, help="Select the odoo and enterprise branch to run (example: 18.0). A worktree of this branch will be created in the instances folder. Define the name if no project is provided.")
     parser.add_argument("-p", "--project", type=str, help="The addons in the folder projects/{project_name} will be mounted. Also define the name of the container.")
     parser.add_argument("-i", "--install", type=str, help="Install the specified addons")
@@ -187,9 +190,33 @@ def main():
 
     odoo_version = args.version
     project = args.project
-    
     container_name = project if project else odoo_version
     worktree_path = os.path.join(INSTANCE_DIR, container_name)
+    if args.command == "clean":
+        # Remove the instance folder
+        if os.path.exists(worktree_path):
+            print(f"→ Removing instance folder: {worktree_path}")
+            shutil.rmtree(worktree_path)
+        else:
+            print(f"Instance folder does not exist: {worktree_path}")
+
+        # Drop the database in the db container
+        print(f"→ Dropping database '{container_name}' in container 'db'")
+        drop_db_cmd = [
+            "docker", "exec", "db",
+            "psql", "-U", "odoo", "-d", "postgres",
+            "-c", f"DROP DATABASE IF EXISTS \"{container_name}\";"
+        ]
+        try:
+            subprocess.run(drop_db_cmd, check=True)
+        except subprocess.CalledProcessError as e:
+            print(f"Failed to drop database: {e}")
+
+        # Optionally stop and remove the container if running
+        if container_exists(container_name):
+            print(f"→ Stopping and removing container: {container_name}")
+            subprocess.run(["docker", "rm", "-f", container_name], check=False)
+        return
     debug_port = find_available_port()
     if project and not os.path.exists(os.path.join(PROJECTS_DIR, project)):
         os.makedirs(os.path.join(PROJECTS_DIR, project), exist_ok=True)
@@ -222,10 +249,11 @@ def main():
             try:
                 addons_arg = f"-i {args.install}" if args.install else ""
                 debugpy_cmd = "debugpy --listen 0.0.0.0:5678 " if args.debug else ""
+                project_addons = "/home/odoo/src/custom," if project else ""
                 cmd = [
                     "docker", "exec", "-it", container_name,
                     "bash", "-c",
-                    f"{debugpy_cmd}/home/odoo/src/odoo/odoo-bin --dev=all --addons-path=/home/odoo/src/custom,/home/odoo/src/enterprise,/home/odoo/src/odoo/addons -d {container_name} {addons_arg}"
+                    f"{debugpy_cmd}/home/odoo/src/odoo/odoo-bin --dev=all --addons-path={project_addons}/home/odoo/src/enterprise,/home/odoo/src/odoo/addons -d {container_name} {addons_arg}"
                 ]
                 subprocess.run(cmd, check=True)
             except KeyboardInterrupt:
