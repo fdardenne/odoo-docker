@@ -78,6 +78,8 @@ def run_odoo_container(branch_name, project, worktree_path, addons_to_install):
     if project:
         project_path = os.path.join(PROJECTS_DIR, project)
         volumes += ["-v", f"{project_path}:/home/odoo/custom"]
+        cmd = 'pip3 install --target /home/odoo/custom -r requirements.txt'
+        subprocess.run(cmd, shell=True, check=True)
 
     subprocess.run([
         "docker", "run", "-d", "--rm",  "--name", container_name,
@@ -135,10 +137,19 @@ def main():
     if container_exists(container_name):
         if args.connect:
             subprocess.run(["docker", "exec", "-it", container_name, "bash"], check=True)
-        elif args.code:
-            subprocess.run(["code", os.path.join(worktree_path,"src")], check=True)
         else:
-            subprocess.run(["docker", "exec", "-it", container_name, "/home/odoo/src/odoo/odoo-bin", "--dev=all", "-d", container_name, "-i", args.install], check=True)
+            try:
+                addons_arg = f"-i {args.install}" if args.install else ""
+                cmd = [
+                    "docker", "exec", "-it", container_name,
+                    "bash", "-c",
+                    f"/home/odoo/src/odoo/odoo-bin --dev=all -d {container_name} {addons_arg}; exec bash"
+                ]
+                subprocess.run(cmd, check=True)
+            except KeyboardInterrupt:
+                print("\nOdoo stopped by user (Ctrl+C).")
+        if args.code:
+            subprocess.run(["code", os.path.join(worktree_path,"src")], check=True)
     else:
         run_odoo_container(branch, project, worktree_path, args.install)
         if args.code:
