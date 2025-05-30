@@ -14,6 +14,7 @@
 import os
 import subprocess
 import argparse
+import shutil
 
 BASE_PORT = 8070
 INSTANCE_DIR = os.path.expanduser("~/odoocker/instances")
@@ -22,8 +23,7 @@ ENTERPRISE_REPO = os.path.expanduser("~/odoocker/enterprise")
 PROJECTS_DIR = os.path.expanduser("~/odoocker/projects")
 
 def fetch_branch(repo_path, branch_name):
-    remotes = ["dev", "origin"]
-    found = False
+    remotes = ["origin", "dev"]
     for remote in remotes:
         # Check if branch exists on remote
         result = subprocess.run(
@@ -37,12 +37,11 @@ def fetch_branch(repo_path, branch_name):
         if res.strip():
             print(f"→ Fetching branch '{branch_name}' from remote '{remote}'")
             subprocess.run(["git", "-C", repo_path, "fetch", remote, f"{branch_name}"], check=True)
-            found = True
-    return found
+            return True
+    return False
 
 def instanciate_odoo_folder(branch_name, worktree_path):
     fetch_branch(COMMUNITY_REPO, branch_name)
-    import shutil
     shutil.copytree(COMMUNITY_REPO, os.path.join(worktree_path, "src", "odoo"), dirs_exist_ok=True)
     subprocess.run(["git", "-C", os.path.join(worktree_path, "src", "odoo"), "checkout", branch_name], check=True)
     if os.path.exists(ENTERPRISE_REPO):
@@ -65,8 +64,12 @@ def create_git_worktree(branch_name, worktree_path):
             subprocess.run(["git", "-C", ENTERPRISE_REPO, "worktree", "add", os.path.join(worktree_path, "src", "enterprise"), branch_name], check=True)
         else:
             os.makedirs(os.path.join(worktree_path, "src", "enterprise"), exist_ok=True)
+    vscode_src = os.path.join(INSTANCE_DIR, "../.vscode")
+    vscode_dst = os.path.join(worktree_path, "src", ".vscode")
+    if os.path.exists(vscode_src):
+        shutil.copytree(vscode_src, vscode_dst, dirs_exist_ok=True)
 
-def run_odoo_container(branch_name, project, worktree_path, addons_to_install):
+def run_odoo_container(branch_name, project, worktree_path, addons_to_install, debug=False):
     container_name = project if project else branch_name
     print(f"→ Running the container {container_name} ({container_name}.localhost)")
     volumes = [
@@ -84,6 +87,7 @@ def run_odoo_container(branch_name, project, worktree_path, addons_to_install):
     subprocess.run([
         "docker", "run", "-d", "--rm",  "--name", container_name,
         "--network", "onetwork",
+        "-p", "5678:5678",
         "-e", "PGHOST=db",
         "-e", "PGUSER=odoo",
         "-e", "PGPASSWORD=odoo",
@@ -96,17 +100,18 @@ def run_odoo_container(branch_name, project, worktree_path, addons_to_install):
         "odoo",
         "tail", "-f", "/dev/null"
     ], check=True)
-    cmd = f'yes "" | {worktree_path}/src/odoo/addons/web/tooling/enable.sh'
-    subprocess.run(cmd, shell=True, check=True)
+    # cmd = f'yes "" | {worktree_path}/src/odoo/addons/web/tooling/enable.sh'
+    # subprocess.run(cmd, shell=True, check=True)
     # I don't like git hooks, feel free to comment the following line if it suits your needs
-    cmd = f"git -C {worktree_path}/src/odoo/ config core.hooksPath ''"
-    subprocess.run(cmd, shell=True, check=True)
+    # cmd = f"git -C {worktree_path}/src/odoo/ config core.hooksPath ''"
+    # subprocess.run(cmd, shell=True, check=True)
 
     addons_arg = f"-i {addons_to_install}" if addons_to_install else ""
+    debugpy_cmd = "debugpy --listen 0.0.0.0:5678 " if debug else ""
     cmd = [
         "docker", "exec", "-it", container_name,
         "bash", "-c",
-        f"/home/odoo/src/odoo/odoo-bin --dev=all -d {container_name} {addons_arg}; exec bash"
+        f"{debugpy_cmd}/home/odoo/src/odoo/odoo-bin --dev=all -d {container_name} {addons_arg}; exec bash"
     ]
     subprocess.run(cmd, check=True)
     # subprocess.run(["docker", "exec", "-it", container_name, "/home/odoo/src/odoo/odoo-bin", "--dev=all", "-d", container_name, "-i", addons_to_install], check=True)
@@ -128,6 +133,7 @@ def main():
     parser.add_argument("-p", "--project", type=str, help="The addons in the folder projects/{project_name} will be mounted. Also define the name of the container.")
     parser.add_argument("-i", "--install", type=str, help="Install the specified addons")
     parser.add_argument("-c", "--connect", action="store_true", help="Connect to the container with the shell")
+    parser.add_argument("--debug", action="store_true", help="Run the container in debug mode (with debugpy)")
     parser.add_argument("--code", action="store_true", help="Open vscode to the instances")
     args = parser.parse_args()
 
@@ -142,26 +148,26 @@ def main():
         os.makedirs(os.path.join(PROJECTS_DIR, project), exist_ok=True)
 
     container_name = project if project else branch
+    if args.code:
+        subprocess.run(["code", os.path.join(worktree_path, "src")], check=True)
     if container_exists(container_name):
         if args.connect:
             subprocess.run(["docker", "exec", "-it", container_name, "bash"], check=True)
         else:
             try:
                 addons_arg = f"-i {args.install}" if args.install else ""
+                debugpy_cmd = "debugpy --listen 0.0.0.0:5678 " if args.debug else ""
                 cmd = [
                     "docker", "exec", "-it", container_name,
                     "bash", "-c",
-                    f"/home/odoo/src/odoo/odoo-bin --dev=all -d {container_name} {addons_arg}; exec bash"
+                    f"{debugpy_cmd}/home/odoo/src/odoo/odoo-bin --dev=all -d {container_name} {addons_arg}; exec bash"
                 ]
                 subprocess.run(cmd, check=True)
             except KeyboardInterrupt:
                 print("\nOdoo stopped by user (Ctrl+C).")
-        if args.code:
-            subprocess.run(["code", os.path.join(worktree_path,"src")], check=True)
+       
     else:
-        run_odoo_container(branch, project, worktree_path, args.install)
-        if args.code:
-            subprocess.run(["code", os.path.join(worktree_path,"src")], check=True)
+        run_odoo_container(branch, project, worktree_path, args.install, args.debug)
 
 if __name__ == "__main__":
     main()

@@ -11,6 +11,7 @@ RUN apt-get update && apt-get install -y libsasl2-dev libldap2-dev libssl-dev li
 RUN curl -fsSL https://deb.nodesource.com/setup_18.x | bash -
 RUN apt-get install -y nodejs
 RUN pip3 install -r /home/odoo/requirements.txt
+RUN pip3 install debugpy
 RUN rm -rf /home/odoo/requirements.txt
 
 VOLUME "/home/odoo/src"
